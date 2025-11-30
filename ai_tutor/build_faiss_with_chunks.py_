@@ -1,0 +1,54 @@
+# build_faiss_with_chunks.py
+import os
+import pickle
+import faiss
+import numpy as np
+from sentence_transformers import SentenceTransformer
+
+# --- CONFIG ---
+DOCUMENTS_FOLDER = "ncert_data_txt"  # folder containing extracted .txt files
+CHUNK_SIZE = 300  # number of words per chunk
+INDEX_FILE = "ncert_faiss.index"
+METADATA_FILE = "faiss_metadata.pkl"
+
+# Step 1: Load and chunk all documents
+metadata = {}  # chunk_id -> text
+texts = []
+chunk_ids = []
+
+for file in os.listdir(DOCUMENTS_FOLDER):
+    if not file.endswith(".txt"):
+        continue
+    path = os.path.join(DOCUMENTS_FOLDER, file)
+    with open(path, "r", encoding="utf-8") as f:
+        content = f.read().replace("\n", " ")
+        words = content.split()
+        # Split into chunks
+        for i in range(0, len(words), CHUNK_SIZE):
+            chunk_words = words[i:i+CHUNK_SIZE]
+            chunk_text = " ".join(chunk_words)
+            chunk_id = f"{file}_chunk{i//CHUNK_SIZE+1}"
+            metadata[chunk_id] = chunk_text
+            texts.append(chunk_text)
+            chunk_ids.append(chunk_id)
+
+print(f"Total chunks created: {len(texts)}")
+
+# Step 2: Generate embeddings
+model = SentenceTransformer("all-MiniLM-L6-v2")
+embeddings = model.encode(texts, show_progress_bar=True)
+embeddings = np.array(embeddings, dtype='float32')
+
+# Step 3: Build FAISS index
+dimension = embeddings.shape[1]
+index = faiss.IndexFlatL2(dimension)
+index.add(embeddings)
+print(f"FAISS index created with {index.ntotal} vectors.")
+
+# Step 4: Save FAISS index and metadata
+faiss.write_index(index, INDEX_FILE)
+with open(METADATA_FILE, "wb") as f:
+    pickle.dump(metadata, f)
+
+print(f"FAISS index saved as '{INDEX_FILE}'")
+print(f"Metadata saved as '{METADATA_FILE}'")

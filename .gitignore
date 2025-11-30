@@ -1,4 +1,99 @@
-.venv/
+# -------------------------
+# Python
+# -------------------------
 __pycache__/
-*.pyc
+*.py[cod]
+*$py.class
+*.pyo
+*.pyd
+
+# Virtual environment
+venv/
+ENV/
+env/
+.venv/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Byte-compiled
+*.so
+
+# -------------------------
+# Django / Project
+# -------------------------
 db.sqlite3
+db.sqlite3.bak
+
+# Local settings (if any)
+local_settings.py
+
+# Static / Media (generated)
+static/
+media/
+
+# Migrations backups
+backup_migrations/
+
+# -------------------------
+# AI Tutor / RAG / Whisper
+# -------------------------
+# Audio downloaded for whisper
+audio_temp/
+*.mp3
+*.wav
+*.m4a
+
+# Temp video files
+*.mp4
+*.webm
+*.mkv
+
+# Embeddings + FAISS (do NOT push)
+*.pkl
+*.index
+
+# SentenceTransformer models downloaded
+local_models/
+
+# Ollama models cache (huge)
+~/.ollama/
+ollama/
+
+# HuggingFace cache
+~/.cache/
+huggingface/*
+
+# -------------------------
+# Logs
+# -------------------------
+*.log
+*.out
+*.err
+
+# -------------------------
+# OS + Editor Crap
+# -------------------------
+.DS_Store
+Thumbs.db
+
+# VS Code
+.vscode/
+*.code-workspace
+
+# -------------------------
+# Python Tools
+# -------------------------
+pip-log.txt
+pip-delete-this-directory.txt
+
+# PyInstaller
+*.spec
+
+# -------------------------
+# Build / Dist
+# -------------------------
+build/
+dist/
+*.egg-info/
+.eggs/

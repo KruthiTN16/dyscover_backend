@@ -21,6 +21,9 @@ from collections import Counter
 
 User = get_user_model()
 
+# -------------------------------------------------
+# Authentication + Registration
+# -------------------------------------------------
 class RegisterView(generics.CreateAPIView):
     serializer_class = RegisterSerializer
     permission_classes = [permissions.AllowAny]
@@ -37,58 +40,88 @@ class RegisterView(generics.CreateAPIView):
         }
         return Response(data, status=status.HTTP_201_CREATED)
 
+
 class MyTokenObtainPairView(TokenObtainPairView):
     serializer_class = MyTokenObtainPairSerializer
 
+
+# -------------------------------------------------
+# Concern Text NLP (keywords + summary)
+# -------------------------------------------------
 def analyze_concern_text(text: str):
     if not text:
         return {"summary": "", "keywords": [], "sentiment": "neutral"}
+
     txt = text.lower()
     words = re.findall(r"\b[a-z]{4,}\b", txt)
+
     if not words:
         return {"summary": text[:200], "keywords": [], "sentiment": "neutral"}
+
     counts = Counter(words)
     keywords = [w for w, _ in counts.most_common(5)]
+
     positive_cues = sum(1 for w in words if w in {"good", "improve", "improved", "better"})
-    negative_cues = sum(1 for w in words if w in {"struggl", "struggle", "difficul", "frustrat", "avoid", "problem", "worri"})
-    sentiment = "negative" if negative_cues > positive_cues else ("positive" if positive_cues > negative_cues else "neutral")
+    negative_cues = sum(
+        1 for w in words if w in
+        {"struggl", "struggle", "difficul", "frustrat", "avoid", "problem", "worri"}
+    )
+
+    sentiment = (
+        "negative" if negative_cues > positive_cues
+        else "positive" if positive_cues > negative_cues
+        else "neutral"
+    )
+
     summary = " ".join(words[:20])
+
     return {"summary": summary, "keywords": keywords, "sentiment": sentiment}
 
+
+# -------------------------------------------------
+# Risk Probability (Logistic Demo Model)
+# -------------------------------------------------
 QUESTION_ORDER = [
     "reads_slowly","spelling_difficulty","memory_issues","phonological_awareness",
     "misreads_words","avoids_reading","letter_confusion","rapid_naming",
     "copying_difficulty","frustration_reading",
 ]
+
 BASE_WEIGHTS = [0.85,0.7,0.5,0.75,0.7,0.35,0.9,0.6,0.45,0.5]
+
 
 def compute_risk_probability(answer_dict):
     vec = []
-    for k in QUESTION_ORDER:
-        v = answer_dict.get(k)
+    for key in QUESTION_ORDER:
         try:
-            vnum = float(v)
-        except Exception:
-            vnum = 0.0
-        vec.append(vnum)
+            vec.append(float(answer_dict.get(key, 0)))
+        except:
+            vec.append(0.0)
+
     linear = sum([a*b for a,b in zip(vec, BASE_WEIGHTS)])
     denom = sum(BASE_WEIGHTS) * 3.0
     offset = sum(BASE_WEIGHTS) * 1.5
+
     linear_norm = (linear - offset) / denom
     prob = 1.0 / (1.0 + math.exp(-4.0 * linear_norm))
-    prob = max(0.0, min(1.0, prob))
-    return prob
+    return max(0.0, min(1.0, prob))
 
+
+# -------------------------------------------------
+# Parent Assessment Submit
+# -------------------------------------------------
 class ParentAssessmentSubmitView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
-    def post(self, request, *args, **kwargs):
+    def post(self, request):
         data = request.data
         parent = request.user
+
         student_name = data.get("student_name") or "Unknown"
         answers = data.get("answers", {})
+
         if not isinstance(answers, dict):
-            return Response({"detail":"answers must be a dict"}, status=400)
+            return Response({"detail": "answers must be a dict"}, status=400)
 
         assessment = Assessment.objects.create(
             questionnaire=None,
@@ -97,10 +130,10 @@ class ParentAssessmentSubmitView(APIView):
         )
 
         prob = compute_risk_probability(answers)
-        risk_label = 1 if prob >= 0.5 else 0
+        risk_label = "At Risk" if prob >= 0.5 else "Low Risk"
         risk_level = "High" if prob >= 0.7 else ("Moderate" if prob >= 0.5 else "Low")
 
-        risk = RiskResult.objects.create(
+        RiskResult.objects.create(
             assessment=assessment,
             risk_score=prob,
             risk_level=risk_level,
@@ -109,7 +142,8 @@ class ParentAssessmentSubmitView(APIView):
 
         parent_concern = data.get("parent_concern", "")
         nlp = analyze_concern_text(parent_concern)
-        concern = ConcernAnalysis.objects.create(
+
+        ConcernAnalysis.objects.create(
             assessment=assessment,
             summary=nlp.get("summary",""),
             keywords=",".join(nlp.get("keywords",[])),
@@ -117,37 +151,78 @@ class ParentAssessmentSubmitView(APIView):
         )
 
         recommended_experts = [
-            {"name":"Dr. Priya Sharma","specialty":"Educational Psychologist","contact":"example@clinic.org"},
-            {"name":"Mr. R. Nair","specialty":"Speech & Language Therapist","contact":"example2@clinic.org"},
+            {"name": "Dr. Priya Sharma", "specialty": "Educational Psychologist", "contact": "example@clinic.org"},
+            {"name": "Mr. R. Nair", "specialty": "Speech & Language Therapist", "contact": "example2@clinic.org"},
         ]
 
-        response = {
+        return Response({
             "assessment_id": assessment.id,
-            "student_name": assessment.student_name,
+            "student_name": student_name,
             "risk_probability": round(prob, 3),
-            "risk_label": "At Risk" if risk_label else "Low Risk",
+            "risk_label": risk_label,
             "risk_level": risk_level,
-            "nlp_summary": nlp.get("summary"),
-            "nlp_keywords": nlp.get("keywords"),
-            "nlp_sentiment": nlp.get("sentiment"),
+            "nlp_summary": nlp["summary"],
+            "nlp_keywords": nlp["keywords"],
+            "nlp_sentiment": nlp["sentiment"],
             "recommended_experts": recommended_experts,
-        }
-        return Response(response, status=status.HTTP_201_CREATED)
+        }, status=201)
 
+
+# -------------------------------------------------
+# Educator View Assessment
+# -------------------------------------------------
 class EducatorStudentView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request, student_id):
         assessments = Assessment.objects.filter(id=student_id)
         if not assessments.exists():
-            return Response({"detail":"No assessment found"}, status=404)
+            return Response({"detail": "No assessment found"}, status=404)
+
         a = assessments.first()
-        risk_qs = a.risk_results.all().order_by("-created_at")
-        concern_qs = a.concern_analyses.all().order_by("-created_at")
-        risk_ser = RiskResultSerializer(risk_qs, many=True)
-        concern_ser = ConcernAnalysisSerializer(concern_qs, many=True)
+        risks = RiskResultSerializer(a.risk_results.all().order_by("-created_at"), many=True)
+        concerns = ConcernAnalysisSerializer(a.concern_analyses.all().order_by("-created_at"), many=True)
+
         return Response({
             "assessment": AssessmentSubmitSerializer(a).data,
-            "risks": risk_ser.data,
-            "concerns": concern_ser.data
+            "risks": risks.data,
+            "concerns": concerns.data,
         })
+
+
+# =================================================
+#                ⭐ AI TUTOR API ⭐
+# =================================================
+
+from ai_tutor.rag_youtube import YouTubeRAG
+yt_rag = YouTubeRAG()
+
+
+# --- 1) Search YouTube ---
+class SearchYouTube(APIView):
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request):
+        query = request.data.get("query", "")
+        if not query:
+            return Response({"error": "query is required"}, status=400)
+
+        results = yt_rag.search_youtube(query)
+        return Response({"results": results})
+
+
+# --- 2) Ask Tutor ---
+class AskTutor(APIView):
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request):
+        video_id = request.data.get("video_id")
+        question = request.data.get("question")
+
+        if not video_id or not question:
+            return Response({"error": "video_id and question are required"}, status=400)
+
+        yt_rag.prepare_video(video_id)
+        answer = yt_rag.ask_video(question, video_id)
+
+        return Response({"answer": answer})
